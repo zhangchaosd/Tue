@@ -14,7 +14,7 @@ struct HostDetailView: View {
         Group {
             if let host = store.host(id: hostID) {
                 let profileID = store.profileID(containing: host.id)
-                let group = profileID.map { store.group(for: host, in: $0) } ?? HostGroup.fallback
+                let groups = profileID.map { store.groups(for: host, in: $0) } ?? [HostGroup.fallback]
                 let sameNamedHosts = profileID.map { store.hosts(namedLike: host, in: $0) } ?? []
 
                 List {
@@ -36,21 +36,23 @@ struct HostDetailView: View {
                         }
                     }
 
-                    Section("Host Group") {
-                        Label(group.name, systemImage: group.symbolName)
-                            .foregroundStyle(group.tint.color)
+                    Section("Labels") {
+                        ForEach(groups) { group in
+                            Label(group.name, systemImage: group.symbolName)
+                                .foregroundStyle(group.tint.color)
+                        }
                     }
 
                     if let profileID, sameNamedHosts.count > 1 {
                         Section("Same-Name Hosts") {
                             ForEach(sameNamedHosts) { sameNamedHost in
-                                let sameNamedGroup = store.group(for: sameNamedHost, in: profileID)
+                                let sameNamedGroups = store.groups(for: sameNamedHost, in: profileID)
 
                                 if sameNamedHost.id == host.id {
-                                    SameNamedHostRow(host: sameNamedHost, group: sameNamedGroup, isCurrent: true)
+                                    SameNamedHostRow(host: sameNamedHost, groups: sameNamedGroups, isCurrent: true)
                                 } else {
                                     NavigationLink(value: sameNamedHost.id) {
-                                        SameNamedHostRow(host: sameNamedHost, group: sameNamedGroup, isCurrent: false)
+                                        SameNamedHostRow(host: sameNamedHost, groups: sameNamedGroups, isCurrent: false)
                                     }
                                 }
                             }
@@ -104,19 +106,23 @@ struct HostDetailView: View {
 
 private struct SameNamedHostRow: View {
     let host: HostRecord
-    let group: HostGroup
+    let groups: [HostGroup]
     let isCurrent: Bool
+
+    private var primaryGroup: HostGroup {
+        groups.first ?? HostGroup.fallback
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: group.symbolName)
-                .foregroundStyle(group.tint.color)
+            Image(systemName: primaryGroup.symbolName)
+                .foregroundStyle(primaryGroup.tint.color)
                 .frame(width: 28, height: 28)
-                .background(group.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .background(primaryGroup.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 8) {
-                    Text(group.name)
+                    Text(groups.map(\.name).joined(separator: ", "))
                         .font(.headline)
                         .lineLimit(1)
 

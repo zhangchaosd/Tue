@@ -56,6 +56,28 @@ struct HostGroup: Identifiable, Codable, Hashable {
     var tint: HostGroupTint
     var sortOrder: Int
 
+    static let availableSymbols = [
+        "tag",
+        "folder",
+        "tray",
+        "hammer",
+        "checklist",
+        "shippingbox",
+        "server.rack",
+        "terminal",
+        "network",
+        "globe",
+        "lock",
+        "key",
+        "externaldrive",
+        "cloud",
+        "desktopcomputer",
+        "laptopcomputer",
+        "bolt",
+        "shield",
+        "wrench.and.screwdriver"
+    ]
+
     static var defaultGroups: [HostGroup] {
         [
             HostGroup(id: developmentID, name: "Development", symbolName: "hammer", tint: .teal, sortOrder: 0),
@@ -138,6 +160,7 @@ struct HostProfile: Identifiable, Hashable {
     var name: String
     var groups: [HostGroup]
     var hosts: [HostRecord]
+    var hostOrderByGroupID: [String: [UUID]] = [:]
 }
 
 extension HostProfile: Codable {
@@ -146,6 +169,7 @@ extension HostProfile: Codable {
         case name
         case groups
         case hosts
+        case hostOrderByGroupID
     }
 
     init(from decoder: Decoder) throws {
@@ -161,10 +185,12 @@ extension HostProfile: Codable {
         let groupIDs = Set(decodedGroups.map(\.id))
         let fallbackGroupID = decodedGroups.first { $0.id == HostGroup.otherID }?.id ?? decodedGroups[0].id
         groups = decodedGroups
+        hostOrderByGroupID = try container.decodeIfPresent([String: [UUID]].self, forKey: .hostOrderByGroupID) ?? [:]
         hosts = try container.decode([HostRecord].self, forKey: .hosts).map { host in
             var normalizedHost = host
-            if !groupIDs.contains(normalizedHost.groupID) {
-                normalizedHost.groupID = fallbackGroupID
+            normalizedHost.groupIDs = normalizedHost.groupIDs.filter { groupIDs.contains($0) }.uniqued()
+            if normalizedHost.groupIDs.isEmpty {
+                normalizedHost.groupIDs = [fallbackGroupID]
             }
             return normalizedHost
         }
@@ -176,6 +202,7 @@ extension HostProfile: Codable {
         try container.encode(name, forKey: .name)
         try container.encode(groups, forKey: .groups)
         try container.encode(hosts, forKey: .hosts)
+        try container.encode(hostOrderByGroupID, forKey: .hostOrderByGroupID)
     }
 }
 
@@ -218,9 +245,56 @@ struct HostRecord: Identifiable, Hashable {
     var hostname: String
     var ipAddress: String
     var port: String
-    var groupID: UUID
+    var groupIDs: [UUID]
     var accounts: [HostAccount]
     var note: String
+
+    init(
+        id: UUID = UUID(),
+        hostname: String,
+        ipAddress: String,
+        port: String,
+        groupID: UUID,
+        accounts: [HostAccount],
+        note: String
+    ) {
+        self.init(
+            id: id,
+            hostname: hostname,
+            ipAddress: ipAddress,
+            port: port,
+            groupIDs: [groupID],
+            accounts: accounts,
+            note: note
+        )
+    }
+
+    init(
+        id: UUID = UUID(),
+        hostname: String,
+        ipAddress: String,
+        port: String,
+        groupIDs: [UUID],
+        accounts: [HostAccount],
+        note: String
+    ) {
+        self.id = id
+        self.hostname = hostname
+        self.ipAddress = ipAddress
+        self.port = port
+        self.groupIDs = groupIDs.uniqued()
+        self.accounts = accounts
+        self.note = note
+    }
+
+    var groupID: UUID {
+        get {
+            groupIDs.first ?? HostGroup.otherID
+        }
+        set {
+            groupIDs = [newValue]
+        }
+    }
 
     var loginSummary: String {
         let endpoint = port.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -244,6 +318,7 @@ extension HostRecord: Codable {
         case password
         case port
         case groupID
+        case groupIDs
         case accounts
         case environment
         case note
@@ -265,12 +340,14 @@ extension HostRecord: Codable {
             accounts = username.isEmpty ? [] : [HostAccount(username: username, password: password)]
         }
 
-        if let groupID = try container.decodeIfPresent(UUID.self, forKey: .groupID) {
-            self.groupID = groupID
+        if let groupIDs = try container.decodeIfPresent([UUID].self, forKey: .groupIDs), !groupIDs.isEmpty {
+            self.groupIDs = groupIDs.uniqued()
+        } else if let groupID = try container.decodeIfPresent(UUID.self, forKey: .groupID) {
+            self.groupIDs = [groupID]
         } else if let legacyEnvironment = try? container.decode(LegacyHostEnvironment.self, forKey: .environment) {
-            groupID = legacyEnvironment.groupID
+            groupIDs = [legacyEnvironment.groupID]
         } else {
-            groupID = HostGroup.otherID
+            groupIDs = [HostGroup.otherID]
         }
     }
 
@@ -280,6 +357,7 @@ extension HostRecord: Codable {
         try container.encode(hostname, forKey: .hostname)
         try container.encode(ipAddress, forKey: .ipAddress)
         try container.encode(port, forKey: .port)
+        try container.encode(groupIDs, forKey: .groupIDs)
         try container.encode(groupID, forKey: .groupID)
         try container.encode(accounts, forKey: .accounts)
         try container.encode(note, forKey: .note)
@@ -289,4 +367,11 @@ extension HostRecord: Codable {
 struct HostArchive: Codable {
     var selectedProfileID: UUID?
     var profiles: [HostProfile]
+}
+
+extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
 }

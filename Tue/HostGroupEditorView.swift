@@ -25,7 +25,7 @@ struct HostGroupEditorView: View {
                         }
                     }
 
-                    Section("Add Host Group") {
+                    Section("Add Label") {
                         HStack {
                             TextField("Name", text: $newGroupName)
                                 .textInputAutocapitalization(.never)
@@ -37,7 +37,7 @@ struct HostGroupEditorView: View {
                                 Image(systemName: "plus.circle.fill")
                                     .imageScale(.large)
                             }
-                            .accessibilityLabel("Add Host Group")
+                            .accessibilityLabel("Add Label")
                             .disabled(trimmed(newGroupName).isEmpty)
                         }
                     }
@@ -46,7 +46,7 @@ struct HostGroupEditorView: View {
                 ContentUnavailableView("Profile Not Found", systemImage: "questionmark.folder")
             }
         }
-        .navigationTitle("Edit Host Groups")
+        .navigationTitle("Edit Labels")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -55,7 +55,7 @@ struct HostGroupEditorView: View {
                 }
             }
         }
-        .alert("Delete Host Group", isPresented: isConfirmingDelete) {
+        .alert("Delete Label", isPresented: isConfirmingDelete) {
             if let pendingDeleteGroup {
                 Button("Delete", role: .destructive) {
                     store.deleteGroup(id: pendingDeleteGroup.id, in: profileID)
@@ -76,7 +76,7 @@ struct HostGroupEditorView: View {
 
         let count = store.hostCount(inGroup: pendingDeleteGroup.id, profileID: profileID)
         if count > 0 {
-            return "\(hostCountText(count)) using \"\(pendingDeleteGroup.name)\" will move to the fallback group."
+            return "\(hostCountText(count)) using \"\(pendingDeleteGroup.name)\" will lose this label. Hosts with no labels will move to the fallback label."
         }
         return pendingDeleteGroup.name
     }
@@ -116,6 +116,18 @@ private struct HostGroupEditorRow: View {
             Image(systemName: group.symbolName)
                 .foregroundStyle(group.tint.color)
                 .frame(width: 24)
+                .contextMenu {
+                    LabelIconMenu(profileID: profileID, group: group)
+                }
+
+            Menu {
+                LabelIconMenu(profileID: profileID, group: group)
+            } label: {
+                Image(systemName: "chevron.down.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Change icon for \(group.name)")
 
             HostGroupNameField(profileID: profileID, group: group)
 
@@ -145,7 +157,7 @@ private struct HostGroupNameField: View {
     }
 
     var body: some View {
-        TextField("Group Name", text: $name)
+        TextField("Label Name", text: $name)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .onSubmit(save)
@@ -159,6 +171,23 @@ private struct HostGroupNameField: View {
 
     private func save() {
         store.updateGroupName(id: group.id, name: name, in: profileID)
+    }
+}
+
+private struct LabelIconMenu: View {
+    @Environment(HostStore.self) private var store
+
+    let profileID: UUID
+    let group: HostGroup
+
+    var body: some View {
+        ForEach(HostGroup.availableSymbols, id: \.self) { symbolName in
+            Button {
+                store.updateGroupSymbol(id: group.id, symbolName: symbolName, in: profileID)
+            } label: {
+                Label(symbolName, systemImage: symbolName)
+            }
+        }
     }
 }
 

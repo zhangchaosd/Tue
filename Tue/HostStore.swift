@@ -110,8 +110,15 @@ final class HostStore {
         group(id: host.groupID, in: profileID) ?? HostGroup.fallback
     }
 
+    func groups(for host: HostRecord, in profileID: UUID) -> [HostGroup] {
+        let profileGroups = groups(in: profileID)
+        let groupsByID = Dictionary(uniqueKeysWithValues: profileGroups.map { ($0.id, $0) })
+        let hostGroups = host.groupIDs.compactMap { groupsByID[$0] }
+        return hostGroups.isEmpty ? [HostGroup.fallback] : hostGroups
+    }
+
     func hostCount(inGroup groupID: UUID, profileID: UUID) -> Int {
-        profile(id: profileID)?.hosts.filter { $0.groupID == groupID }.count ?? 0
+        profile(id: profileID)?.hosts.filter { $0.groupIDs.contains(groupID) }.count ?? 0
     }
 
     @discardableResult
@@ -140,6 +147,18 @@ final class HostStore {
         save()
     }
 
+    func updateGroupSymbol(id groupID: UUID, symbolName: String, in profileID: UUID) {
+        guard HostGroup.availableSymbols.contains(symbolName),
+              let profileIndex = profiles.firstIndex(where: { $0.id == profileID }),
+              let groupIndex = profiles[profileIndex].groups.firstIndex(where: { $0.id == groupID })
+        else {
+            return
+        }
+
+        profiles[profileIndex].groups[groupIndex].symbolName = symbolName
+        save()
+    }
+
     func deleteGroup(id groupID: UUID, in profileID: UUID) {
         guard let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) else { return }
         guard profiles[profileIndex].groups.count > 1 else { return }
@@ -147,30 +166,37 @@ final class HostStore {
         guard let fallbackGroupID = fallbackGroupID(afterDeleting: groupID, in: profiles[profileIndex]) else { return }
         profiles[profileIndex].groups.removeAll { $0.id == groupID }
 
-        for hostIndex in profiles[profileIndex].hosts.indices where profiles[profileIndex].hosts[hostIndex].groupID == groupID {
-            profiles[profileIndex].hosts[hostIndex].groupID = fallbackGroupID
+        for hostIndex in profiles[profileIndex].hosts.indices {
+            profiles[profileIndex].hosts[hostIndex].groupIDs.removeAll { $0 == groupID }
+            if profiles[profileIndex].hosts[hostIndex].groupIDs.isEmpty {
+                profiles[profileIndex].hosts[hostIndex].groupIDs = [fallbackGroupID]
+            }
         }
+        profiles[profileIndex].hostOrderByGroupID[groupID.uuidString] = nil
+        normalizeHostOrders(for: profileIndex)
         save()
     }
 
-    func hosts(in profileID: UUID, groupID: UUID?, query: String) -> [HostRecord] {
+    func hosts(in profileID: UUID, matchingLabelIDs labelIDs: Set<UUID>, query: String) -> [HostRecord] {
         guard let profile = profiles.first(where: { $0.id == profileID }) else { return [] }
 
         let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return profile.hosts
             .filter { host in
-                guard let groupID else { return true }
-                return host.groupID == groupID
+                guard !labelIDs.isEmpty else { return true }
+                return labelIDs.isSubset(of: Set(host.groupIDs))
             }
             .filter { host in
                 guard !normalizedQuery.isEmpty else { return true }
-                let groupName = group(id: host.groupID, in: profileID)?.name ?? ""
+                let groupNames = host.groupIDs
+                    .compactMap { group(id: $0, in: profileID)?.name }
+                    .joined(separator: " ")
                 let accountNames = host.accounts.map(\.username).joined(separator: " ")
                 return [
                     host.hostname,
                     host.ipAddress,
                     accountNames,
-                    groupName,
+                    groupNames,
                     host.note
                 ]
                 .joined(separator: " ")
@@ -178,10 +204,18 @@ final class HostStore {
                 .contains(normalizedQuery)
             }
             .sorted { left, right in
-                let leftGroup = group(id: left.groupID, in: profileID)
-                let rightGroup = group(id: right.groupID, in: profileID)
-                let leftSortOrder = leftGroup?.sortOrder ?? Int.max
-                let rightSortOrder = rightGroup?.sortOrder ?? Int.max
+                if labelIDs.count == 1, let groupID = labelIDs.first {
+                    let order = profile.hostOrderByGroupID[groupID.uuidString] ?? []
+                    let orderRanks = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($0.element, $0.offset) })
+                    let leftRank = orderRanks[left.id] ?? Int.max
+                    let rightRank = orderRanks[right.id] ?? Int.max
+                    if leftRank != rightRank {
+                        return leftRank < rightRank
+                    }
+                }
+
+                let leftSortOrder = primarySortOrder(for: left, in: profile)
+                let rightSortOrder = primarySortOrder(for: right, in: profile)
 
                 if leftSortOrder == rightSortOrder {
                     return left.hostname.localizedStandardCompare(right.hostname) == .orderedAscending
@@ -199,10 +233,8 @@ final class HostStore {
         return profile.hosts
             .filter { trimmed($0.hostname).lowercased() == normalizedHostname }
             .sorted { left, right in
-                let leftGroup = group(id: left.groupID, in: profileID)
-                let rightGroup = group(id: right.groupID, in: profileID)
-                let leftSortOrder = leftGroup?.sortOrder ?? Int.max
-                let rightSortOrder = rightGroup?.sortOrder ?? Int.max
+                let leftSortOrder = primarySortOrder(for: left, in: profile)
+                let rightSortOrder = primarySortOrder(for: right, in: profile)
 
                 if leftSortOrder == rightSortOrder {
                     return left.ipAddress.localizedStandardCompare(right.ipAddress) == .orderedAscending
@@ -235,13 +267,29 @@ final class HostStore {
         } else {
             profiles[profileIndex].hosts.append(normalizedHost)
         }
+        normalizeHostOrders(for: profileIndex)
         save()
     }
 
     func deleteHost(id: UUID) {
         for profileIndex in profiles.indices {
             profiles[profileIndex].hosts.removeAll { $0.id == id }
+            normalizeHostOrders(for: profileIndex)
         }
+        save()
+    }
+
+    func moveHosts(in profileID: UUID, groupID: UUID, hosts visibleHosts: [HostRecord], from source: IndexSet, to destination: Int) {
+        guard let profileIndex = profiles.firstIndex(where: { $0.id == profileID }) else { return }
+        var orderedHostIDs = visibleHosts.map(\.id)
+        let movingIDs = source.sorted().map { orderedHostIDs[$0] }
+        for index in source.sorted(by: >) {
+            orderedHostIDs.remove(at: index)
+        }
+        let adjustedDestination = destination - source.filter { $0 < destination }.count
+        orderedHostIDs.insert(contentsOf: movingIDs, at: adjustedDestination)
+        profiles[profileIndex].hostOrderByGroupID[groupID.uuidString] = orderedHostIDs
+        normalizeHostOrders(for: profileIndex)
         save()
     }
 
@@ -275,16 +323,17 @@ final class HostStore {
             .filter { !trimmed($0.username).isEmpty }
 
         guard !hostname.isEmpty, !ipAddress.isEmpty, !accounts.isEmpty else { return nil }
-        let groupID = profile.groups.contains { $0.id == host.groupID }
-            ? host.groupID
-            : fallbackGroupID(in: profile)
+        let validGroupIDs = host.groupIDs
+            .filter { groupID in profile.groups.contains { $0.id == groupID } }
+            .uniqued()
+        let groupIDs = validGroupIDs.isEmpty ? [fallbackGroupID(in: profile)] : validGroupIDs
 
         return HostRecord(
             id: host.id,
             hostname: hostname,
             ipAddress: ipAddress,
             port: trimmed(host.port),
-            groupID: groupID,
+            groupIDs: groupIDs,
             accounts: accounts,
             note: trimmed(host.note)
         )
@@ -303,6 +352,36 @@ final class HostStore {
         }
     }
 
+    private func primarySortOrder(for host: HostRecord, in profile: HostProfile) -> Int {
+        host.groupIDs
+            .compactMap { groupID in profile.groups.first { $0.id == groupID }?.sortOrder }
+            .min() ?? Int.max
+    }
+
+    private func normalizeHostOrders(for profileIndex: Int) {
+        let hosts = profiles[profileIndex].hosts
+        let hostIDs = Set(hosts.map(\.id))
+        let labelIDs = Set(profiles[profileIndex].groups.map(\.id))
+
+        profiles[profileIndex].hostOrderByGroupID = profiles[profileIndex].hostOrderByGroupID.reduce(into: [:]) { result, entry in
+            guard let groupID = UUID(uuidString: entry.key), labelIDs.contains(groupID) else { return }
+            let orderedIDs = entry.value.filter { hostIDs.contains($0) }.uniqued()
+            guard !orderedIDs.isEmpty else { return }
+            result[entry.key] = orderedIDs
+        }
+
+        for groupID in labelIDs {
+            let key = groupID.uuidString
+            let existing = profiles[profileIndex].hostOrderByGroupID[key] ?? []
+            let existingSet = Set(existing)
+            let missing = hosts
+                .filter { $0.groupIDs.contains(groupID) && !existingSet.contains($0.id) }
+                .sorted { $0.hostname.localizedStandardCompare($1.hostname) == .orderedAscending }
+                .map(\.id)
+            profiles[profileIndex].hostOrderByGroupID[key] = existing + missing
+        }
+    }
+
     private func importedCopy(of profile: HostProfile) -> HostProfile {
         let groups = sortedGroups(profile.groups.isEmpty ? HostGroup.defaultGroups : profile.groups)
         let importedProfileID = UUID()
@@ -310,18 +389,34 @@ final class HostStore {
         let profileShell = HostProfile(id: importedProfileID, name: importedName, groups: groups, hosts: [])
         let groupIDs = Set(groups.map(\.id))
         let fallbackGroupID = fallbackGroupID(in: profileShell)
+        var hostIDMap: [UUID: UUID] = [:]
 
         let hosts = profile.hosts.compactMap { host -> HostRecord? in
             var importedHost = host
+            let originalHostID = host.id
             importedHost.id = UUID()
-            importedHost.groupID = groupIDs.contains(host.groupID) ? host.groupID : fallbackGroupID
+            hostIDMap[originalHostID] = importedHost.id
+            importedHost.groupIDs = host.groupIDs.filter { groupIDs.contains($0) }.uniqued()
+            if importedHost.groupIDs.isEmpty {
+                importedHost.groupIDs = [fallbackGroupID]
+            }
             importedHost.accounts = host.accounts.map { account in
                 HostAccount(id: UUID(), username: account.username, password: account.password)
             }
             return normalized(importedHost, in: profileShell)
         }
 
-        return HostProfile(id: importedProfileID, name: importedName, groups: groups, hosts: hosts)
+        var importedProfile = HostProfile(id: importedProfileID, name: importedName, groups: groups, hosts: hosts)
+        importedProfile.hostOrderByGroupID = profile.hostOrderByGroupID.reduce(into: [:]) { result, entry in
+            let importedOrder = entry.value.compactMap { hostIDMap[$0] }
+            if !importedOrder.isEmpty {
+                result[entry.key] = importedOrder
+            }
+        }
+
+        let importedStore = HostStore(storageURL: nil, seedProfiles: [importedProfile])
+        importedStore.normalizeHostOrders(for: 0)
+        return importedStore.profiles[0]
     }
 
     private func uniqueProfileName(basedOn name: String) -> String {

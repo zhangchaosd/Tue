@@ -10,7 +10,7 @@ struct HostEditorView: View {
     @State private var hostname: String
     @State private var ipAddress: String
     @State private var port: String
-    @State private var groupID: UUID
+    @State private var groupIDs: Set<UUID>
     @State private var accounts: [HostAccount]
     @State private var note: String
 
@@ -26,7 +26,7 @@ struct HostEditorView: View {
         _hostname = State(initialValue: host?.hostname ?? "")
         _ipAddress = State(initialValue: host?.ipAddress ?? "")
         _port = State(initialValue: host?.port ?? "22")
-        _groupID = State(initialValue: host?.groupID ?? HostGroup.developmentID)
+        _groupIDs = State(initialValue: Set(host?.groupIDs ?? [HostGroup.developmentID]))
         _accounts = State(initialValue: initialAccounts)
         _note = State(initialValue: host?.note ?? "")
     }
@@ -44,13 +44,10 @@ struct HostEditorView: View {
                     .keyboardType(.numbersAndPunctuation)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+            }
 
-                Picker("Host Group", selection: $groupID) {
-                    ForEach(groups) { group in
-                        Label(group.name, systemImage: group.symbolName)
-                            .tag(group.id)
-                    }
-                }
+            Section("Labels") {
+                LabelSelectionRows(groups: groups, selection: $groupIDs)
             }
 
             Section("Login Info") {
@@ -83,11 +80,11 @@ struct HostEditorView: View {
         .navigationTitle(host == nil ? "Add Host" : "Edit Host")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            selectFallbackGroupIfNeeded(groups)
+            selectFallbackGroupsIfNeeded(groups)
             ensureAccountRow()
         }
         .onChange(of: groups) { _, nextGroups in
-            selectFallbackGroupIfNeeded(nextGroups)
+            selectFallbackGroupsIfNeeded(nextGroups)
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -108,6 +105,7 @@ struct HostEditorView: View {
     private var canSave: Bool {
         !trimmed(hostname).isEmpty
             && !trimmed(ipAddress).isEmpty
+            && !groupIDs.isEmpty
             && accounts.contains { !trimmed($0.username).isEmpty }
     }
 
@@ -117,7 +115,7 @@ struct HostEditorView: View {
             hostname: trimmed(hostname),
             ipAddress: trimmed(ipAddress),
             port: trimmed(port),
-            groupID: groupID,
+            groupIDs: orderedGroupIDs(),
             accounts: accounts,
             note: trimmed(note)
         )
@@ -129,10 +127,18 @@ struct HostEditorView: View {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func selectFallbackGroupIfNeeded(_ groups: [HostGroup]) {
-        if !groups.contains(where: { $0.id == groupID }), let fallbackGroupID = groups.first?.id {
-            groupID = fallbackGroupID
+    private func selectFallbackGroupsIfNeeded(_ groups: [HostGroup]) {
+        let validGroupIDs = Set(groups.map(\.id))
+        groupIDs = groupIDs.intersection(validGroupIDs)
+        if groupIDs.isEmpty, let fallbackGroupID = groups.first?.id {
+            groupIDs = [fallbackGroupID]
         }
+    }
+
+    private func orderedGroupIDs() -> [UUID] {
+        store.groups(in: profileID)
+            .map(\.id)
+            .filter { groupIDs.contains($0) }
     }
 
     private func deleteAccount(id: UUID) {
@@ -144,6 +150,41 @@ struct HostEditorView: View {
     private func ensureAccountRow() {
         if accounts.isEmpty {
             accounts = [HostAccount(username: "", password: "")]
+        }
+    }
+}
+
+private struct LabelSelectionRows: View {
+    let groups: [HostGroup]
+    @Binding var selection: Set<UUID>
+
+    var body: some View {
+        ForEach(groups) { group in
+            Button {
+                toggle(group.id)
+            } label: {
+                HStack {
+                    Label(group.name, systemImage: group.symbolName)
+                        .foregroundStyle(group.tint.color)
+
+                    Spacer()
+
+                    if selection.contains(group.id) {
+                        Image(systemName: "checkmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.tint)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func toggle(_ groupID: UUID) {
+        if selection.contains(groupID), selection.count > 1 {
+            selection.remove(groupID)
+        } else {
+            selection.insert(groupID)
         }
     }
 }

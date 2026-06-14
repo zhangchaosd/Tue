@@ -3,8 +3,9 @@ import UniformTypeIdentifiers
 
 struct HostDirectoryView: View {
     @Environment(HostStore.self) private var store
+    @Environment(\.editMode) private var editMode
 
-    @State private var selectedGroupID: UUID?
+    @State private var selectedLabelIDs: Set<UUID> = []
     @State private var query = ""
     @State private var sheet: HostSheet?
     @State private var isExportingProfile = false
@@ -29,6 +30,10 @@ struct HostDirectoryView: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    if selectedLabelIDs.count == 1 && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        EditButton()
+                    }
+
                     Menu {
                         Button {
                             if let profileID = store.currentProfile?.id {
@@ -43,7 +48,7 @@ struct HostDirectoryView: View {
                                 sheet = .editGroups(profileID: profileID)
                             }
                         } label: {
-                            Label("Edit Host Groups", systemImage: "tag")
+                            Label("Edit Labels", systemImage: "tag")
                         }
 
                         Button(action: exportCurrentProfile) {
@@ -107,10 +112,12 @@ struct HostDirectoryView: View {
     @ViewBuilder
     private func directoryContent(for profile: HostProfile) -> some View {
         let groups = store.groups(in: profile.id)
-        let hosts = store.hosts(in: profile.id, groupID: selectedGroupID, query: query)
+        let hosts = store.hosts(in: profile.id, matchingLabelIDs: selectedLabelIDs, query: query)
+        let selectedLabelID = selectedLabelIDs.first
+        let canMoveHosts = selectedLabelIDs.count == 1 && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         VStack(spacing: 0) {
-            HostGroupFilterBar(groups: groups, selection: $selectedGroupID)
+            HostLabelFilterBar(groups: groups, selection: $selectedLabelIDs)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .padding(.bottom, 4)
@@ -123,7 +130,7 @@ struct HostDirectoryView: View {
                 if hosts.isEmpty {
                     Section {
                         ContentUnavailableView(
-                            query.isEmpty ? "No hosts in this group" : "No matching hosts",
+                            emptyTitle(selectedLabelCount: selectedLabelIDs.count),
                             systemImage: "server.rack"
                         )
                         .frame(maxWidth: .infinity)
@@ -133,25 +140,40 @@ struct HostDirectoryView: View {
                     Section {
                         ForEach(hosts) { host in
                             NavigationLink(value: host.id) {
-                                HostRowView(host: host, group: store.group(for: host, in: profile.id))
+                                HostRowView(host: host, groups: store.groups(for: host, in: profile.id))
                             }
                         }
                         .onDelete { offsets in
                             pendingDeleteHostIDs = offsets.map { hosts[$0].id }
                         }
+                        .onMove { source, destination in
+                            guard canMoveHosts, let selectedLabelID else { return }
+                            store.moveHosts(in: profile.id, groupID: selectedLabelID, hosts: hosts, from: source, to: destination)
+                        }
+                        .moveDisabled(!canMoveHosts)
                     }
                 }
             }
             .listStyle(.insetGrouped)
         }
-        .searchable(text: $query, prompt: "Search hostname, IP, username, group, or notes")
+        .searchable(text: $query, prompt: "Search hostname, IP, username, label, or notes")
         .onChange(of: profile.id) { _, _ in
-            selectedGroupID = nil
+            selectedLabelIDs = []
+            editMode?.wrappedValue = .inactive
         }
         .onChange(of: groups) { _, nextGroups in
-            if let selectedGroupID, !nextGroups.contains(where: { $0.id == selectedGroupID }) {
-                self.selectedGroupID = nil
+            let validLabelIDs = Set(nextGroups.map(\.id))
+            let nextSelection = selectedLabelIDs.intersection(validLabelIDs)
+            if nextSelection != selectedLabelIDs {
+                selectedLabelIDs = nextSelection
+                editMode?.wrappedValue = .inactive
             }
+        }
+        .onChange(of: selectedLabelIDs) { _, _ in
+            editMode?.wrappedValue = .inactive
+        }
+        .onChange(of: query) { _, _ in
+            editMode?.wrappedValue = .inactive
         }
     }
 
@@ -259,7 +281,7 @@ struct HostDirectoryView: View {
         do {
             let data = try Data(contentsOf: url)
             let profile = try store.importProfile(from: data)
-            selectedGroupID = nil
+            selectedLabelIDs = []
             query = ""
             transferAlert = ProfileTransferAlert(
                 title: "Profile Imported",
@@ -287,6 +309,21 @@ struct HostDirectoryView: View {
     private func hostCountText(_ count: Int) -> String {
         "\(count) \(count == 1 ? "host" : "hosts")"
     }
+
+    private func emptyTitle(selectedLabelCount: Int) -> String {
+        guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "No matching hosts"
+        }
+
+        switch selectedLabelCount {
+        case 0:
+            return "No hosts yet"
+        case 1:
+            return "No hosts with this label"
+        default:
+            return "No hosts with these labels"
+        }
+    }
 }
 
 private struct ProfileTransferAlert: Identifiable {
@@ -295,20 +332,25 @@ private struct ProfileTransferAlert: Identifiable {
     let message: String
 }
 
-private struct HostGroupFilterBar: View {
+private struct HostLabelFilterBar: View {
     let groups: [HostGroup]
-    @Binding var selection: UUID?
+    @Binding var selection: Set<UUID>
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                HostGroupFilterButton(
-                    title: "All",
-                    systemImage: "tray.full",
-                    tint: .secondary,
-                    isSelected: selection == nil
-                ) {
-                    selection = nil
+                if !selection.isEmpty {
+                    Button {
+                        selection = []
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 30, height: 30)
+                            .background(.secondary.opacity(0.12), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear label filters")
                 }
 
                 ForEach(groups) { group in
@@ -316,12 +358,20 @@ private struct HostGroupFilterBar: View {
                         title: group.name,
                         systemImage: group.symbolName,
                         tint: group.tint.color,
-                        isSelected: selection == group.id
+                        isSelected: selection.contains(group.id)
                     ) {
-                        selection = group.id
+                        toggle(group.id)
                     }
                 }
             }
+        }
+    }
+
+    private func toggle(_ groupID: UUID) {
+        if selection.contains(groupID) {
+            selection.remove(groupID)
+        } else {
+            selection.insert(groupID)
         }
     }
 }
@@ -369,7 +419,7 @@ private struct ProfileSummaryRow: View {
                     ForEach(groups) { group in
                         HostGroupCountPill(
                             group: group,
-                            count: profile.hosts.filter { $0.groupID == group.id }.count
+                            count: profile.hosts.filter { $0.groupIDs.contains(group.id) }.count
                         )
                     }
                 }
@@ -405,36 +455,60 @@ private struct HostGroupCountPill: View {
 
 private struct HostRowView: View {
     let host: HostRecord
-    let group: HostGroup
+    let groups: [HostGroup]
+
+    private var primaryGroup: HostGroup {
+        groups.first ?? HostGroup.fallback
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: group.symbolName)
-                .foregroundStyle(group.tint.color)
+            Image(systemName: primaryGroup.symbolName)
+                .foregroundStyle(primaryGroup.tint.color)
                 .frame(width: 28, height: 28)
-                .background(group.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .background(primaryGroup.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
 
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 8) {
-                    Text(host.hostname)
-                        .font(.headline)
-                        .lineLimit(1)
-
-                    Text(group.name)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(group.tint.color)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(group.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                }
+                Text(host.hostname)
+                    .font(.headline)
+                    .lineLimit(1)
 
                 Text(host.loginSummary)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                LabelChipRow(groups: groups)
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+private struct LabelChipRow: View {
+    let groups: [HostGroup]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(groups.prefix(3)) { group in
+                Text(group.name)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(group.tint.color)
+                    .lineLimit(1)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(group.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+            }
+
+            if groups.count > 3 {
+                Text("+\(groups.count - 3)")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+            }
+        }
     }
 }
 
