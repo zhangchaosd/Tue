@@ -8,6 +8,7 @@ struct HostEditorView: View {
     let host: HostRecord?
 
     @State private var hostname: String
+    @State private var domainName: String
     @State private var ipAddress: String
     @State private var port: String
     @State private var groupIDs: Set<UUID>
@@ -24,6 +25,7 @@ struct HostEditorView: View {
             initialAccounts = [HostAccount(username: "", password: "")]
         }
         _hostname = State(initialValue: host?.hostname ?? "")
+        _domainName = State(initialValue: host?.domainName ?? "")
         _ipAddress = State(initialValue: host?.ipAddress ?? "")
         _port = State(initialValue: host?.port ?? "22")
         _groupIDs = State(initialValue: Set(host?.groupIDs ?? [HostGroup.developmentID]))
@@ -37,6 +39,11 @@ struct HostEditorView: View {
         Form {
             Section("Basic Info") {
                 TextField("Hostname", text: $hostname)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                TextField("Domain (Optional)", text: $domainName)
+                    .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
@@ -113,6 +120,7 @@ struct HostEditorView: View {
         let nextHost = HostRecord(
             id: host?.id ?? UUID(),
             hostname: trimmed(hostname),
+            domainName: trimmed(domainName),
             ipAddress: trimmed(ipAddress),
             port: trimmed(port),
             groupIDs: orderedGroupIDs(),
@@ -175,6 +183,8 @@ private struct LabelSelectionRows: View {
                             .foregroundStyle(.tint)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }

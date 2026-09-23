@@ -156,7 +156,7 @@ struct HostDirectoryView: View {
             }
             .listStyle(.insetGrouped)
         }
-        .searchable(text: $query, prompt: "Search hostname, IP, username, label, or notes")
+        .searchable(text: $query, prompt: "Search hostname, domain, IP, username, label, or notes")
         .onChange(of: profile.id) { _, _ in
             selectedLabelIDs = []
             editMode?.wrappedValue = .inactive

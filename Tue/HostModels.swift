@@ -243,6 +243,7 @@ extension HostAccount: Codable {
 struct HostRecord: Identifiable, Hashable {
     var id: UUID
     var hostname: String
+    var domainName: String
     var ipAddress: String
     var port: String
     var groupIDs: [UUID]
@@ -252,6 +253,7 @@ struct HostRecord: Identifiable, Hashable {
     init(
         id: UUID = UUID(),
         hostname: String,
+        domainName: String = "",
         ipAddress: String,
         port: String,
         groupID: UUID,
@@ -261,6 +263,7 @@ struct HostRecord: Identifiable, Hashable {
         self.init(
             id: id,
             hostname: hostname,
+            domainName: domainName,
             ipAddress: ipAddress,
             port: port,
             groupIDs: [groupID],
@@ -272,6 +275,7 @@ struct HostRecord: Identifiable, Hashable {
     init(
         id: UUID = UUID(),
         hostname: String,
+        domainName: String = "",
         ipAddress: String,
         port: String,
         groupIDs: [UUID],
@@ -280,6 +284,7 @@ struct HostRecord: Identifiable, Hashable {
     ) {
         self.id = id
         self.hostname = hostname
+        self.domainName = domainName
         self.ipAddress = ipAddress
         self.port = port
         self.groupIDs = groupIDs.uniqued()
@@ -297,9 +302,14 @@ struct HostRecord: Identifiable, Hashable {
     }
 
     var loginSummary: String {
-        let endpoint = port.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let trimmedDomainName = domainName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let address = trimmedDomainName.isEmpty
             ? ipAddress
-            : "\(ipAddress):\(port)"
+            : trimmedDomainName
+        let trimmedPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endpoint = trimmedPort.isEmpty
+            ? address
+            : "\(address):\(trimmedPort)"
 
         guard let firstAccount = accounts.first else { return endpoint }
         if accounts.count == 1 {
@@ -313,6 +323,7 @@ extension HostRecord: Codable {
     private enum CodingKeys: String, CodingKey {
         case id
         case hostname
+        case domainName
         case ipAddress
         case username
         case password
@@ -328,6 +339,7 @@ extension HostRecord: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         hostname = try container.decode(String.self, forKey: .hostname)
+        domainName = try container.decodeIfPresent(String.self, forKey: .domainName) ?? ""
         ipAddress = try container.decode(String.self, forKey: .ipAddress)
         port = try container.decode(String.self, forKey: .port)
         note = try container.decode(String.self, forKey: .note)
@@ -355,6 +367,7 @@ extension HostRecord: Codable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(hostname, forKey: .hostname)
+        try container.encode(domainName, forKey: .domainName)
         try container.encode(ipAddress, forKey: .ipAddress)
         try container.encode(port, forKey: .port)
         try container.encode(groupIDs, forKey: .groupIDs)

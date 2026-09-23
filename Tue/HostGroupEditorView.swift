@@ -8,6 +8,8 @@ struct HostGroupEditorView: View {
 
     @State private var newGroupName = ""
     @State private var pendingDeleteGroup: HostGroup?
+    @FocusState private var focusedGroupID: UUID?
+    @FocusState private var isNewGroupNameFocused: Bool
 
     var body: some View {
         Group {
@@ -18,6 +20,7 @@ struct HostGroupEditorView: View {
                             HostGroupEditorRow(
                                 profileID: profileID,
                                 group: group,
+                                focusedGroupID: $focusedGroupID,
                                 canDelete: profile.groups.count > 1
                             ) {
                                 pendingDeleteGroup = group
@@ -28,6 +31,7 @@ struct HostGroupEditorView: View {
                     Section("Add Label") {
                         HStack {
                             TextField("Name", text: $newGroupName)
+                                .focused($isNewGroupNameFocused)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
 
@@ -40,6 +44,12 @@ struct HostGroupEditorView: View {
                             .accessibilityLabel("Add Label")
                             .disabled(trimmed(newGroupName).isEmpty)
                         }
+                        .contentShape(Rectangle())
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                isNewGroupNameFocused = true
+                            }
+                        )
                     }
                 }
             } else {
@@ -108,6 +118,7 @@ struct HostGroupEditorView: View {
 private struct HostGroupEditorRow: View {
     let profileID: UUID
     let group: HostGroup
+    let focusedGroupID: FocusState<UUID?>.Binding
     let canDelete: Bool
     let delete: () -> Void
 
@@ -129,7 +140,7 @@ private struct HostGroupEditorRow: View {
             .buttonStyle(.borderless)
             .accessibilityLabel("Change icon for \(group.name)")
 
-            HostGroupNameField(profileID: profileID, group: group)
+            HostGroupNameField(profileID: profileID, group: group, focusedGroupID: focusedGroupID)
 
             Button(role: .destructive, action: delete) {
                 Image(systemName: "trash")
@@ -139,6 +150,12 @@ private struct HostGroupEditorRow: View {
             .accessibilityLabel("Delete \(group.name)")
             .disabled(!canDelete)
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedGroupID.wrappedValue = group.id
+            }
+        )
     }
 }
 
@@ -147,17 +164,20 @@ private struct HostGroupNameField: View {
 
     let profileID: UUID
     let group: HostGroup
+    let focusedGroupID: FocusState<UUID?>.Binding
 
     @State private var name: String
 
-    init(profileID: UUID, group: HostGroup) {
+    init(profileID: UUID, group: HostGroup, focusedGroupID: FocusState<UUID?>.Binding) {
         self.profileID = profileID
         self.group = group
+        self.focusedGroupID = focusedGroupID
         _name = State(initialValue: group.name)
     }
 
     var body: some View {
         TextField("Label Name", text: $name)
+            .focused(focusedGroupID, equals: group.id)
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .onSubmit(save)

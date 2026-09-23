@@ -20,6 +20,11 @@ struct HostDetailView: View {
                 List {
                     Section {
                         DetailFieldRow(title: "Hostname", value: host.hostname, systemImage: "server.rack")
+
+                        if !host.domainName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            DetailFieldRow(title: "Domain", value: host.domainName, systemImage: "globe")
+                        }
+
                         DetailFieldRow(title: "IP", value: host.ipAddress, systemImage: "network")
 
                         if !host.port.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

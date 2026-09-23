@@ -2,14 +2,16 @@
 
 `Tue` is a lightweight local host memo for individual developers on iOS/iPadOS 17+. It helps save, search, view, and copy server or host login details.
 
+[Download on the App Store](https://apps.apple.com/cn/app/tue/id6778451729)
+
 ## V1 Scope
 
-- Uses a host record model: hostname, IP address, port, labels, multiple login accounts, and notes.
+- Uses a host record model: hostname, optional domain name, IP address, port, labels, multiple login accounts, and notes.
 - Supports multiple Profiles with create, rename, and switch flows.
 - Supports exporting the current Profile as JSON and importing a Profile from JSON.
 - Each Profile has independent labels. Defaults are Development, Testing, Staging, Production, and Other. Labels can be added, renamed, deleted, and customized with icons within the current Profile.
 - A host can belong to multiple labels.
-- Supports multi-label intersection filtering, manual drag sorting inside one selected label, and searching by hostname, IP, username, label, and notes.
+- Supports multi-label intersection filtering, manual drag sorting inside one selected label, and searching by hostname, domain, IP, username, label, and notes.
 - Shows same-name hosts across all labels in the current Profile from the host detail page.
 - Supports adding, editing, and deleting hosts. Hostname, IP, and at least one account username are required; port defaults to `22`.
 - Shows detail fields directly, and tapping a field copies it to the clipboard.
@@ -32,7 +34,7 @@ V1 intentionally stays lightweight and local. Passwords are stored as plain text
 - After adding, editing, or deleting a host, the list, detail page, and persisted JSON should stay consistent.
 - After restarting the app, Profiles, the selected Profile, and host data should be restored.
 - The current Profile can be exported as JSON; importing Profile JSON should add a new Profile while preserving labels, hosts, accounts, and per-label host order.
-- Search should match hostname, IP, any account username, label, and notes.
+- Search should match hostname, domain, IP, any account username, label, and notes.
 - Selecting multiple labels should show only hosts that have all selected labels; manual host order should be preserved per single selected label.
 - Deleting a label that is used by hosts should remove that label from those hosts; any host left without labels should move to the fallback label.
 - Required fields should block saving when empty; empty ports should be hidden on the detail page; one host can store multiple accounts.

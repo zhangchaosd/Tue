@@ -194,6 +194,7 @@ final class HostStore {
                 let accountNames = host.accounts.map(\.username).joined(separator: " ")
                 return [
                     host.hostname,
+                    host.domainName,
                     host.ipAddress,
                     accountNames,
                     groupNames,
@@ -311,6 +312,7 @@ final class HostStore {
 
     private func normalized(_ host: HostRecord, in profile: HostProfile) -> HostRecord? {
         let hostname = trimmed(host.hostname)
+        let domainName = trimmed(host.domainName)
         let ipAddress = trimmed(host.ipAddress)
         let accounts = host.accounts
             .map { account in
@@ -331,6 +333,7 @@ final class HostStore {
         return HostRecord(
             id: host.id,
             hostname: hostname,
+            domainName: domainName,
             ipAddress: ipAddress,
             port: trimmed(host.port),
             groupIDs: groupIDs,
@@ -544,6 +547,7 @@ final class HostStore {
                     HostRecord(
                         id: UUID(),
                         hostname: "dev-api-01",
+                        domainName: "dev-api.internal.example",
                         ipAddress: "10.0.2.21",
                         port: "22",
                         groupID: HostGroup.developmentID,
@@ -556,6 +560,7 @@ final class HostStore {
                     HostRecord(
                         id: UUID(),
                         hostname: "test-db-01",
+                        domainName: "test-db.internal.example",
                         ipAddress: "10.0.8.15",
                         port: "5432",
                         groupID: HostGroup.testingID,
@@ -567,6 +572,7 @@ final class HostStore {
                     HostRecord(
                         id: UUID(),
                         hostname: "prod-web-01",
+                        domainName: "www.example.com",
                         ipAddress: "172.16.0.12",
                         port: "22",
                         groupID: HostGroup.productionID,
@@ -585,6 +591,7 @@ final class HostStore {
                     HostRecord(
                         id: UUID(),
                         hostname: "home-nas",
+                        domainName: "nas.local",
                         ipAddress: "192.168.31.20",
                         port: "22",
                         groupID: HostGroup.productionID,
