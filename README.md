@@ -2,6 +2,8 @@
 
 `Tue` is a lightweight local host memo for individual developers on iOS/iPadOS 17+. It helps save, search, view, and copy server or host login details.
 
+The app is localized in English and Simplified Chinese and follows the system language: Simplified Chinese devices see Chinese, every other language falls back to English. There is no in-app language switch.
+
 [Download on the App Store](https://apps.apple.com/cn/app/tue/id6778451729)
 
 ## V1 Scope
@@ -14,8 +16,20 @@
 - Supports multi-label intersection filtering, manual drag sorting inside one selected label, and searching by hostname, domain, IP, username, label, and notes.
 - Shows same-name hosts across all labels in the current Profile from the host detail page.
 - Supports adding, editing, and deleting hosts. Hostname, IP, and at least one account username are required; port defaults to `22`.
-- Shows detail fields directly, and tapping a field copies it to the clipboard.
+- Shows detail fields directly, and tapping a field copies it to the clipboard. Passwords are hidden until revealed, and each account shows a copyable SSH command.
+- Long-pressing a host offers quick copy actions (IP, domain, username, SSH command), edit, and delete.
+- Built-in labels are stored with English names and displayed in the system language until the user renames them.
 - Stores data in `hosts.json` under the app sandbox's Application Support directory. Example data is created on first launch.
+
+## App Store Assets
+
+`AppStore/` holds the localized (`en-US`, `zh-Hans`) marketing assets:
+
+- `screenshots/<locale>/iPhone-6.9` (1320 x 2868) and `screenshots/<locale>/iPad-13` (2064 x 2752).
+- `creative/<locale>/product-page-header-3840x1646.png` (21:9) and `search-results-3840x2560.png` (3:2), following Apple's creative asset specifications.
+- `metadata.md` with the promotional text and release notes.
+
+Debug builds accept `-TueScreenshotScene list|detail|filter|search|editor|labels` to open a screen directly when retaking screenshots.
 
 ## Explicit Non-Goals
 

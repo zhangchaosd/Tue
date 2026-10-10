@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct HostDirectoryView: View {
@@ -13,9 +14,11 @@ struct HostDirectoryView: View {
     @State private var exportDocument = ProfileJSONDocument()
     @State private var transferAlert: ProfileTransferAlert?
     @State private var pendingDeleteHostIDs: [UUID] = []
+    @State private var copiedValue: String?
+    @State private var path: [UUID] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if let profile = store.currentProfile {
                     directoryContent(for: profile)
@@ -23,7 +26,7 @@ struct HostDirectoryView: View {
                     ContentUnavailableView("No Profiles", systemImage: "person.crop.square")
                 }
             }
-            .navigationTitle("Host Directory")
+            .navigationTitle("Hosts")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     profileMenu
@@ -55,7 +58,7 @@ struct HostDirectoryView: View {
                             Label("Export Profile", systemImage: "square.and.arrow.up")
                         }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: "ellipsis")
                     }
                     .accessibilityLabel("More")
                     .disabled(store.currentProfile == nil)
@@ -91,8 +94,8 @@ struct HostDirectoryView: View {
         )
         .alert(item: $transferAlert) { alert in
             Alert(
-                title: Text(alert.title),
-                message: Text(alert.message),
+                title: Text(verbatim: alert.title),
+                message: Text(verbatim: alert.message),
                 dismissButton: .default(Text("OK"))
             )
         }
@@ -105,9 +108,40 @@ struct HostDirectoryView: View {
                 pendingDeleteHostIDs = []
             }
         } message: {
-            Text(hostDeleteMessage)
+            Text(verbatim: hostDeleteMessage)
+        }
+        .sensoryFeedback(.success, trigger: copiedValue) { _, newValue in newValue != nil }
+        #if DEBUG
+        .task {
+            applyScreenshotScene()
+        }
+        #endif
+    }
+
+    #if DEBUG
+    private func applyScreenshotScene() {
+        guard let scene = ScreenshotScene.current, let profile = store.currentProfile else { return }
+        let firstHost = profile.hosts.first
+        switch scene {
+        case .list:
+            break
+        case .detail:
+            if let firstHost {
+                path = [firstHost.id]
+            }
+        case .filter:
+            selectedLabelIDs = [HostGroup.testingID]
+        case .search:
+            query = "prod"
+        case .editor:
+            if let firstHost {
+                sheet = .editHost(hostID: firstHost.id)
+            }
+        case .labels:
+            sheet = .editGroups(profileID: profile.id)
         }
     }
+    #endif
 
     @ViewBuilder
     private func directoryContent(for profile: HostProfile) -> some View {
@@ -129,18 +163,18 @@ struct HostDirectoryView: View {
 
                 if hosts.isEmpty {
                     Section {
-                        ContentUnavailableView(
-                            emptyTitle(selectedLabelCount: selectedLabelIDs.count),
-                            systemImage: "server.rack"
-                        )
-                        .frame(maxWidth: .infinity)
-                        .listRowBackground(Color.clear)
+                        emptyState(profileID: profile.id)
+                            .frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
                     }
                 } else {
                     Section {
                         ForEach(hosts) { host in
                             NavigationLink(value: host.id) {
                                 HostRowView(host: host, groups: store.groups(for: host, in: profile.id))
+                            }
+                            .contextMenu {
+                                hostContextMenu(for: host)
                             }
                         }
                         .onDelete { offsets in
@@ -156,7 +190,7 @@ struct HostDirectoryView: View {
             }
             .listStyle(.insetGrouped)
         }
-        .searchable(text: $query, prompt: "Search hostname, domain, IP, username, label, or notes")
+        .searchable(text: $query, prompt: Text("Search hosts"))
         .onChange(of: profile.id) { _, _ in
             selectedLabelIDs = []
             editMode?.wrappedValue = .inactive
@@ -183,10 +217,11 @@ struct HostDirectoryView: View {
                 Button {
                     store.selectProfile(profile.id)
                 } label: {
-                    Label(
-                        profile.name,
-                        systemImage: profile.id == store.currentProfile?.id ? "checkmark.circle.fill" : "person.crop.square"
-                    )
+                    Label {
+                        Text(verbatim: profile.name)
+                    } icon: {
+                        Image(systemName: profile.id == store.currentProfile?.id ? "checkmark.circle.fill" : "person.crop.square")
+                    }
                 }
             }
 
@@ -204,8 +239,16 @@ struct HostDirectoryView: View {
                 Label("Import Profile", systemImage: "square.and.arrow.down")
             }
         } label: {
-            Label(store.currentProfile?.name ?? "Profile", systemImage: "person.crop.square")
-                .labelStyle(.titleAndIcon)
+            HStack(spacing: 4) {
+                Text(verbatim: store.currentProfile?.name ?? String(localized: "Profile"))
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 4)
         }
     }
 
@@ -227,9 +270,9 @@ struct HostDirectoryView: View {
     private var hostDeleteMessage: String {
         let hostnames = pendingDeleteHostIDs.compactMap { store.host(id: $0)?.hostname }
         if pendingDeleteHostIDs.count == 1, let hostname = hostnames.first {
-            return "Delete \"\(hostname)\"?"
+            return String(localized: "Delete “\(hostname)”? This can’t be undone.")
         }
-        return "Delete \(pendingDeleteHostIDs.count) selected hosts?"
+        return String(localized: "Delete \(pendingDeleteHostIDs.count) selected hosts? This can’t be undone.")
     }
 
     private func deletePendingHosts() {
@@ -245,17 +288,20 @@ struct HostDirectoryView: View {
             exportDocument = try ProfileJSONDocument(profile: profile)
             isExportingProfile = true
         } catch {
-            transferAlert = ProfileTransferAlert(title: "Export Failed", message: error.localizedDescription)
+            transferAlert = ProfileTransferAlert(title: String(localized: "Export Failed"), message: error.localizedDescription)
         }
     }
 
     private func handleExportResult(_ result: Result<URL, Error>) {
         switch result {
         case .success:
-            transferAlert = ProfileTransferAlert(title: "Profile Exported", message: "The JSON file was saved to the selected location.")
+            transferAlert = ProfileTransferAlert(
+                title: String(localized: "Profile Exported"),
+                message: String(localized: "The JSON file was saved to the selected location.")
+            )
         case .failure(let error):
             guard !isUserCancellation(error) else { return }
-            transferAlert = ProfileTransferAlert(title: "Export Failed", message: error.localizedDescription)
+            transferAlert = ProfileTransferAlert(title: String(localized: "Export Failed"), message: error.localizedDescription)
         }
     }
 
@@ -266,7 +312,7 @@ struct HostDirectoryView: View {
             importProfile(from: url)
         case .failure(let error):
             guard !isUserCancellation(error) else { return }
-            transferAlert = ProfileTransferAlert(title: "Import Failed", message: error.localizedDescription)
+            transferAlert = ProfileTransferAlert(title: String(localized: "Import Failed"), message: error.localizedDescription)
         }
     }
 
@@ -284,11 +330,11 @@ struct HostDirectoryView: View {
             selectedLabelIDs = []
             query = ""
             transferAlert = ProfileTransferAlert(
-                title: "Profile Imported",
-                message: "\"\(profile.name)\" was added with \(hostCountText(profile.hosts.count))."
+                title: String(localized: "Profile Imported"),
+                message: String(localized: "“\(profile.name)” was added with \(profile.hosts.count) hosts.")
             )
         } catch {
-            transferAlert = ProfileTransferAlert(title: "Import Failed", message: error.localizedDescription)
+            transferAlert = ProfileTransferAlert(title: String(localized: "Import Failed"), message: error.localizedDescription)
         }
     }
 
@@ -306,23 +352,89 @@ struct HostDirectoryView: View {
         return nsError.domain == NSCocoaErrorDomain && nsError.code == CocoaError.Code.userCancelled.rawValue
     }
 
-    private func hostCountText(_ count: Int) -> String {
-        "\(count) \(count == 1 ? "host" : "hosts")"
+    @ViewBuilder
+    private func emptyState(profileID: UUID) -> some View {
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ContentUnavailableView.search(text: query)
+        } else if !selectedLabelIDs.isEmpty {
+            ContentUnavailableView {
+                Label {
+                    selectedLabelIDs.count == 1 ? Text("No Hosts with This Label") : Text("No Hosts with These Labels")
+                } icon: {
+                    Image(systemName: "tag.slash")
+                }
+            } description: {
+                Text("Hosts that have every selected label appear here.")
+            } actions: {
+                Button("Clear Filters") {
+                    selectedLabelIDs = []
+                }
+            }
+        } else {
+            ContentUnavailableView {
+                Label("No Hosts Yet", systemImage: "server.rack")
+            } description: {
+                Text("Save a hostname, IP, port, and login once, then copy them with a tap.")
+            } actions: {
+                Button("Add Host") {
+                    sheet = .addHost(profileID: profileID)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
     }
 
-    private func emptyTitle(selectedLabelCount: Int) -> String {
-        guard query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return "No matching hosts"
+    @ViewBuilder
+    private func hostContextMenu(for host: HostRecord) -> some View {
+        Section {
+            Button {
+                copy(host.ipAddress)
+            } label: {
+                Label("Copy IP", systemImage: "network")
+            }
+
+            if !host.domainName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    copy(host.domainName)
+                } label: {
+                    Label("Copy Domain", systemImage: "globe")
+                }
+            }
+
+            if let account = host.accounts.first {
+                Button {
+                    copy(account.username)
+                } label: {
+                    Label("Copy Username", systemImage: "person")
+                }
+
+                Button {
+                    copy(host.sshCommand(for: account))
+                } label: {
+                    Label("Copy SSH Command", systemImage: "terminal")
+                }
+            }
         }
 
-        switch selectedLabelCount {
-        case 0:
-            return "No hosts yet"
-        case 1:
-            return "No hosts with this label"
-        default:
-            return "No hosts with these labels"
+        Section {
+            Button {
+                sheet = .editHost(hostID: host.id)
+            } label: {
+                Label("Edit Host", systemImage: "pencil")
+            }
+
+            Button(role: .destructive) {
+                pendingDeleteHostIDs = [host.id]
+            } label: {
+                Label("Delete Host", systemImage: "trash")
+            }
         }
+    }
+
+    private func copy(_ value: String) {
+        UIPasteboard.general.string = value
+        copiedValue = nil
+        copiedValue = value
     }
 }
 
@@ -355,7 +467,7 @@ private struct HostLabelFilterBar: View {
 
                 ForEach(groups) { group in
                     HostGroupFilterButton(
-                        title: group.name,
+                        title: group.displayName,
                         systemImage: group.symbolName,
                         tint: group.tint.color,
                         isSelected: selection.contains(group.id)
@@ -364,14 +476,19 @@ private struct HostLabelFilterBar: View {
                     }
                 }
             }
+            .padding(.vertical, 2)
         }
+        .scrollClipDisabled()
+        .sensoryFeedback(.selection, trigger: selection)
     }
 
     private func toggle(_ groupID: UUID) {
-        if selection.contains(groupID) {
-            selection.remove(groupID)
-        } else {
-            selection.insert(groupID)
+        withAnimation(.snappy(duration: 0.25)) {
+            if selection.contains(groupID) {
+                selection.remove(groupID)
+            } else {
+                selection.insert(groupID)
+            }
         }
     }
 }
@@ -385,15 +502,21 @@ private struct HostGroupFilterButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .foregroundStyle(isSelected ? .white : tint)
-                .background(isSelected ? tint : tint.opacity(0.12), in: Capsule())
+            Label {
+                Text(verbatim: title)
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .foregroundStyle(isSelected ? .white : tint)
+            .background(isSelected ? tint : tint.opacity(0.14), in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
@@ -404,12 +527,17 @@ private struct ProfileSummaryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label(profile.name, systemImage: "folder")
-                    .font(.headline)
+                Label {
+                    Text(verbatim: profile.name)
+                } icon: {
+                    Image(systemName: "folder.fill")
+                        .foregroundStyle(.tint)
+                }
+                .font(.headline)
 
                 Spacer()
 
-                Text(hostCountText(profile.hosts.count))
+                Text("\(profile.hosts.count) hosts")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -426,10 +554,6 @@ private struct ProfileSummaryRow: View {
             }
         }
         .padding(.vertical, 4)
-    }
-
-    private func hostCountText(_ count: Int) -> String {
-        "\(count) \(count == 1 ? "host" : "hosts")"
     }
 }
 
@@ -450,6 +574,8 @@ private struct HostGroupCountPill: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(group.tint.color.opacity(0.12), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(group.displayName): \(count) hosts"))
     }
 }
 
@@ -464,16 +590,17 @@ private struct HostRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: primaryGroup.symbolName)
+                .font(.body.weight(.medium))
                 .foregroundStyle(primaryGroup.tint.color)
-                .frame(width: 28, height: 28)
-                .background(primaryGroup.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: 36, height: 36)
+                .background(primaryGroup.tint.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(host.hostname)
+                Text(verbatim: host.hostname)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text(host.loginSummary)
+                Text(verbatim: host.loginSummary)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -491,22 +618,22 @@ private struct LabelChipRow: View {
     var body: some View {
         HStack(spacing: 6) {
             ForEach(groups.prefix(3)) { group in
-                Text(group.name)
+                Text(verbatim: group.displayName)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(group.tint.color)
                     .lineLimit(1)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(group.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                    .background(group.tint.color.opacity(0.12), in: Capsule())
             }
 
             if groups.count > 3 {
-                Text("+\(groups.count - 3)")
+                Text(verbatim: "+\(groups.count - 3)")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                    .background(.secondary.opacity(0.12), in: Capsule())
             }
         }
     }

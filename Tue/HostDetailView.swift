@@ -19,37 +19,52 @@ struct HostDetailView: View {
 
                 List {
                     Section {
+                        HostHeaderView(host: host, groups: groups)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
+
+                    Section {
                         DetailFieldRow(title: "Hostname", value: host.hostname, systemImage: "server.rack")
 
                         if !host.domainName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             DetailFieldRow(title: "Domain", value: host.domainName, systemImage: "globe")
                         }
 
-                        DetailFieldRow(title: "IP", value: host.ipAddress, systemImage: "network")
+                        DetailFieldRow(title: "IP Address", value: host.ipAddress, systemImage: "point.3.connected.trianglepath.dotted")
 
                         if !host.port.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             DetailFieldRow(title: "Port", value: host.port, systemImage: "number")
                         }
+                    } footer: {
+                        Text("Tap any field to copy it.")
                     }
 
-                    Section("Accounts") {
-                        ForEach(Array(host.accounts.enumerated()), id: \.element.id) { index, account in
-                            AccountDetailRow(
-                                account: account,
-                                title: host.accounts.count > 1 ? "Account \(index + 1)" : nil
+                    ForEach(Array(host.accounts.enumerated()), id: \.element.id) { index, account in
+                        Section {
+                            DetailFieldRow(title: "Username", value: account.username, systemImage: "person")
+
+                            if !account.password.isEmpty {
+                                DetailFieldRow(title: "Password", value: account.password, systemImage: "key", isSecret: true)
+                            }
+
+                            DetailFieldRow(
+                                title: "SSH Command",
+                                value: host.sshCommand(for: account),
+                                systemImage: "terminal",
+                                isMonospaced: true
                             )
-                        }
-                    }
-
-                    Section("Labels") {
-                        ForEach(groups) { group in
-                            Label(group.name, systemImage: group.symbolName)
-                                .foregroundStyle(group.tint.color)
+                        } header: {
+                            if host.accounts.count > 1 {
+                                Text("Account \(index + 1)")
+                            } else {
+                                Text("Account")
+                            }
                         }
                     }
 
                     if let profileID, sameNamedHosts.count > 1 {
-                        Section("Same-Name Hosts") {
+                        Section {
                             ForEach(sameNamedHosts) { sameNamedHost in
                                 let sameNamedGroups = store.groups(for: sameNamedHost, in: profileID)
 
@@ -61,12 +76,16 @@ struct HostDetailView: View {
                                     }
                                 }
                             }
+                        } header: {
+                            Text("Same-Name Hosts")
+                        } footer: {
+                            Text("Other hosts in this Profile with the same hostname.")
                         }
                     }
 
                     if !host.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Section("Notes") {
-                            Text(host.note)
+                            Text(verbatim: host.note)
                                 .textSelection(.enabled)
                         }
                     }
@@ -76,6 +95,7 @@ struct HostDetailView: View {
                             isConfirmingDelete = true
                         } label: {
                             Label("Delete Host", systemImage: "trash")
+                                .foregroundStyle(.red)
                         }
                     }
                 }
@@ -83,29 +103,75 @@ struct HostDetailView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button {
+                        Button("Edit") {
                             sheet = .editHost(hostID: host.id)
-                        } label: {
-                            Image(systemName: "square.and.pencil")
                         }
-                        .accessibilityLabel("Edit Host")
                     }
                 }
-                .alert("Delete Host", isPresented: $isConfirmingDelete) {
-                    Button("Delete", role: .destructive) {
-                        store.deleteHost(id: host.id)
+                .confirmationDialog(
+                    Text("Delete “\(host.hostname)”?"),
+                    isPresented: $isConfirmingDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete Host", role: .destructive) {
                         dismiss()
+                        store.deleteHost(id: host.id)
                     }
-
-                    Button("Cancel", role: .cancel) {}
                 } message: {
-                    Text("Delete \"\(host.hostname)\"?")
+                    Text("This can’t be undone.")
                 }
             } else {
                 ContentUnavailableView("Host Not Found", systemImage: "questionmark.folder")
             }
         }
         .hostSheets(sheet: $sheet)
+    }
+}
+
+private struct HostHeaderView: View {
+    let host: HostRecord
+    let groups: [HostGroup]
+
+    private var primaryGroup: HostGroup {
+        groups.first ?? HostGroup.fallback
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: primaryGroup.symbolName)
+                .font(.system(size: 30, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 68, height: 68)
+                .background(primaryGroup.tint.color.gradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            VStack(spacing: 4) {
+                Text(verbatim: host.hostname)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(verbatim: host.loginSummary)
+                    .font(.subheadline.monospaced())
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(groups) { group in
+                    Label {
+                        Text(verbatim: group.displayName)
+                    } icon: {
+                        Image(systemName: group.symbolName)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(group.tint.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(group.tint.color.opacity(0.14), in: Capsule())
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 }
 
@@ -122,12 +188,12 @@ private struct SameNamedHostRow: View {
         HStack(spacing: 12) {
             Image(systemName: primaryGroup.symbolName)
                 .foregroundStyle(primaryGroup.tint.color)
-                .frame(width: 28, height: 28)
-                .background(primaryGroup.tint.color.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: 32, height: 32)
+                .background(primaryGroup.tint.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(groups.map(\.name).joined(separator: ", "))
+                    Text(verbatim: groups.map(\.displayName).formatted(.list(type: .and, width: .narrow)))
                         .font(.headline)
                         .lineLimit(1)
 
@@ -137,81 +203,97 @@ private struct SameNamedHostRow: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+                            .background(.secondary.opacity(0.12), in: Capsule())
                     }
                 }
 
-                Text(host.loginSummary)
+                Text(verbatim: host.loginSummary)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
-    }
-}
-
-private struct AccountDetailRow: View {
-    let account: HostAccount
-    let title: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let title {
-                Label(title, systemImage: "person.crop.circle")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-
-            DetailFieldRow(title: "Username", value: account.username, systemImage: "person")
-
-            if !account.password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                DetailFieldRow(title: "Password", value: account.password, systemImage: "key")
-            }
-        }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 
 private struct DetailFieldRow: View {
-    let title: String
+    let title: LocalizedStringKey
     let value: String
     let systemImage: String
+    var isSecret = false
+    var isMonospaced = false
 
     @State private var didCopy = false
+    @State private var isRevealed = false
 
     var body: some View {
-        Button {
-            UIPasteboard.general.string = value
-            didCopy = true
+        HStack(spacing: 12) {
+            Button(action: copy) {
+                HStack(spacing: 12) {
+                    Image(systemName: systemImage)
+                        .foregroundStyle(.tint)
+                        .frame(width: 24)
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                didCopy = false
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(.tint)
-                    .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Text(value)
-                        .font(.body)
+                        Group {
+                            if isSecret && !isRevealed {
+                                Text(verbatim: String(repeating: "•", count: min(max(value.count, 6), 12)))
+                            } else {
+                                Text(verbatim: value)
+                            }
+                        }
+                        .font(isMonospaced || isSecret ? .body.monospaced() : .body)
                         .foregroundStyle(.primary)
-                        .textSelection(.enabled)
+                        .contentTransition(.opacity)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: didCopy ? "checkmark.circle.fill" : "doc.on.doc")
+                        .foregroundStyle(didCopy ? AnyShapeStyle(.green) : AnyShapeStyle(.tertiary))
+                        .contentTransition(.symbolEffect(.replace))
+                        .accessibilityHidden(true)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(Text("Copies to the clipboard"))
 
-                Spacer()
-
-                Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                    .foregroundStyle(didCopy ? .green : .secondary)
+            if isSecret {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        isRevealed.toggle()
+                    }
+                } label: {
+                    Image(systemName: isRevealed ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(isRevealed ? Text("Hide Password") : Text("Show Password"))
             }
         }
-        .buttonStyle(.plain)
+        .sensoryFeedback(.success, trigger: didCopy) { _, newValue in newValue }
+        .task(id: didCopy) {
+            guard didCopy else { return }
+            try? await Task.sleep(for: .seconds(1.4))
+            withAnimation {
+                didCopy = false
+            }
+        }
+    }
+
+    private func copy() {
+        UIPasteboard.general.string = value
+        withAnimation(.snappy(duration: 0.2)) {
+            didCopy = true
+        }
     }
 }
 

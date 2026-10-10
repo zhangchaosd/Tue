@@ -40,6 +40,21 @@ enum HostGroupTint: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    var displayName: String {
+        switch self {
+        case .teal: String(localized: "Teal")
+        case .indigo: String(localized: "Indigo")
+        case .orange: String(localized: "Orange")
+        case .red: String(localized: "Red")
+        case .gray: String(localized: "Gray")
+        case .blue: String(localized: "Blue")
+        case .green: String(localized: "Green")
+        case .purple: String(localized: "Purple")
+        case .pink: String(localized: "Pink")
+        case .mint: String(localized: "Mint")
+        }
+    }
+
     static let customPalette: [HostGroupTint] = [.blue, .green, .purple, .pink, .mint, .teal, .indigo]
 }
 
@@ -77,6 +92,46 @@ struct HostGroup: Identifiable, Codable, Hashable {
         "shield",
         "wrench.and.screwdriver"
     ]
+
+    /// Built-in labels are stored with their English names so exported JSON stays stable;
+    /// they are shown in the system language as long as the user hasn't renamed them.
+    var displayName: String {
+        guard let builtIn = Self.builtInNames[id], name == builtIn.english else { return name }
+        return String(localized: builtIn.localized)
+    }
+
+    private static let builtInNames: [UUID: (english: String, localized: String.LocalizationValue)] = [
+        developmentID: ("Development", "Development"),
+        testingID: ("Testing", "Testing"),
+        stagingID: ("Staging", "Staging"),
+        productionID: ("Production", "Production"),
+        otherID: ("Other", "Other")
+    ]
+
+    static func displayName(forSymbol symbolName: String) -> String {
+        switch symbolName {
+        case "tag": String(localized: "Tag")
+        case "folder": String(localized: "Folder")
+        case "tray": String(localized: "Tray")
+        case "hammer": String(localized: "Hammer")
+        case "checklist": String(localized: "Checklist")
+        case "shippingbox": String(localized: "Box")
+        case "server.rack": String(localized: "Server")
+        case "terminal": String(localized: "Terminal")
+        case "network": String(localized: "Network")
+        case "globe": String(localized: "Globe")
+        case "lock": String(localized: "Lock")
+        case "key": String(localized: "Key")
+        case "externaldrive": String(localized: "Drive")
+        case "cloud": String(localized: "Cloud")
+        case "desktopcomputer": String(localized: "Desktop")
+        case "laptopcomputer": String(localized: "Laptop")
+        case "bolt": String(localized: "Bolt")
+        case "shield": String(localized: "Shield")
+        case "wrench.and.screwdriver": String(localized: "Tools")
+        default: symbolName
+        }
+    }
 
     static var defaultGroups: [HostGroup] {
         [
@@ -301,11 +356,20 @@ struct HostRecord: Identifiable, Hashable {
         }
     }
 
-    var loginSummary: String {
+    /// The domain when one is set, otherwise the IP address.
+    var preferredAddress: String {
         let trimmedDomainName = domainName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let address = trimmedDomainName.isEmpty
-            ? ipAddress
-            : trimmedDomainName
+        return trimmedDomainName.isEmpty ? ipAddress : trimmedDomainName
+    }
+
+    func sshCommand(for account: HostAccount) -> String {
+        let trimmedPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
+        let portArgument = trimmedPort.isEmpty || trimmedPort == "22" ? "" : " -p \(trimmedPort)"
+        return "ssh\(portArgument) \(account.username)@\(preferredAddress)"
+    }
+
+    var loginSummary: String {
+        let address = preferredAddress
         let trimmedPort = port.trimmingCharacters(in: .whitespacesAndNewlines)
         let endpoint = trimmedPort.isEmpty
             ? address

@@ -15,7 +15,7 @@ struct HostGroupEditorView: View {
         Group {
             if let profile = store.profile(id: profileID) {
                 Form {
-                    Section(profile.name) {
+                    Section {
                         ForEach(store.groups(in: profileID)) { group in
                             HostGroupEditorRow(
                                 profileID: profileID,
@@ -26,12 +26,17 @@ struct HostGroupEditorView: View {
                                 pendingDeleteGroup = group
                             }
                         }
+                    } header: {
+                        Text(verbatim: profile.name)
+                    } footer: {
+                        Text("Tap the icon to change its symbol and color. Labels belong to the current Profile.")
                     }
 
                     Section("Add Label") {
                         HStack {
-                            TextField("Name", text: $newGroupName)
+                            TextField("New Label Name", text: $newGroupName)
                                 .focused($isNewGroupNameFocused)
+                                .onSubmit(addGroup)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
 
@@ -65,7 +70,7 @@ struct HostGroupEditorView: View {
                 }
             }
         }
-        .alert("Delete Label", isPresented: isConfirmingDelete) {
+        .alert(Text(deleteTitle), isPresented: isConfirmingDelete) {
             if let pendingDeleteGroup {
                 Button("Delete", role: .destructive) {
                     store.deleteGroup(id: pendingDeleteGroup.id, in: profileID)
@@ -77,8 +82,13 @@ struct HostGroupEditorView: View {
                 pendingDeleteGroup = nil
             }
         } message: {
-            Text(deleteMessage)
+            Text(verbatim: deleteMessage)
         }
+    }
+
+    private var deleteTitle: String {
+        guard let pendingDeleteGroup else { return String(localized: "Delete Label") }
+        return String(localized: "Delete “\(pendingDeleteGroup.displayName)”?")
     }
 
     private var deleteMessage: String {
@@ -86,9 +96,9 @@ struct HostGroupEditorView: View {
 
         let count = store.hostCount(inGroup: pendingDeleteGroup.id, profileID: profileID)
         if count > 0 {
-            return "\(hostCountText(count)) using \"\(pendingDeleteGroup.name)\" will lose this label. Hosts with no labels will move to the fallback label."
+            return String(localized: "\(count) hosts will lose this label. Hosts left without labels move to the fallback label.")
         }
-        return pendingDeleteGroup.name
+        return String(localized: "No hosts use this label.")
     }
 
     private var isConfirmingDelete: Binding<Bool> {
@@ -104,14 +114,11 @@ struct HostGroupEditorView: View {
     private func addGroup() {
         guard store.addGroup(name: newGroupName, in: profileID) != nil else { return }
         newGroupName = ""
+        isNewGroupNameFocused = true
     }
 
     private func trimmed(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func hostCountText(_ count: Int) -> String {
-        "\(count) \(count == 1 ? "host" : "hosts")"
     }
 }
 
@@ -124,30 +131,26 @@ private struct HostGroupEditorRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: group.symbolName)
-                .foregroundStyle(group.tint.color)
-                .frame(width: 24)
-                .contextMenu {
-                    LabelIconMenu(profileID: profileID, group: group)
-                }
-
             Menu {
                 LabelIconMenu(profileID: profileID, group: group)
             } label: {
-                Image(systemName: "chevron.down.circle")
-                    .foregroundStyle(.secondary)
+                Image(systemName: group.symbolName)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(group.tint.color)
+                    .frame(width: 34, height: 34)
+                    .background(group.tint.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Change icon for \(group.name)")
+            .accessibilityLabel(Text("Change icon for \(group.displayName)"))
 
             HostGroupNameField(profileID: profileID, group: group, focusedGroupID: focusedGroupID)
 
             Button(role: .destructive, action: delete) {
-                Image(systemName: "trash")
-                    .foregroundStyle(.red)
+                Image(systemName: "minus.circle.fill")
+                    .foregroundStyle(canDelete ? AnyShapeStyle(.red) : AnyShapeStyle(.quaternary))
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Delete \(group.name)")
+            .accessibilityLabel(Text("Delete \(group.displayName)"))
             .disabled(!canDelete)
         }
         .contentShape(Rectangle())
@@ -172,7 +175,7 @@ private struct HostGroupNameField: View {
         self.profileID = profileID
         self.group = group
         self.focusedGroupID = focusedGroupID
-        _name = State(initialValue: group.name)
+        _name = State(initialValue: group.displayName)
     }
 
     var body: some View {
@@ -182,7 +185,7 @@ private struct HostGroupNameField: View {
             .autocorrectionDisabled()
             .onSubmit(save)
             .onDisappear(perform: save)
-            .onChange(of: group.name) { _, nextName in
+            .onChange(of: group.displayName) { _, nextName in
                 if name != nextName {
                     name = nextName
                 }
@@ -190,6 +193,8 @@ private struct HostGroupNameField: View {
     }
 
     private func save() {
+        // Leave built-in labels untouched unless the name really changed, so they keep following the system language.
+        guard name.trimmingCharacters(in: .whitespacesAndNewlines) != group.displayName else { return }
         store.updateGroupName(id: group.id, name: name, in: profileID)
     }
 }
@@ -201,12 +206,49 @@ private struct LabelIconMenu: View {
     let group: HostGroup
 
     var body: some View {
-        ForEach(HostGroup.availableSymbols, id: \.self) { symbolName in
-            Button {
-                store.updateGroupSymbol(id: group.id, symbolName: symbolName, in: profileID)
-            } label: {
-                Label(symbolName, systemImage: symbolName)
+        Picker(selection: tintBinding) {
+            ForEach(HostGroupTint.allCases) { tint in
+                Label {
+                    Text(verbatim: tint.displayName)
+                } icon: {
+                    Image(systemName: "circle.fill")
+                        .foregroundStyle(tint.color)
+                }
+                .tag(tint)
             }
+        } label: {
+            Label("Color", systemImage: "paintpalette")
+        }
+        .pickerStyle(.menu)
+
+        Picker(selection: symbolBinding) {
+            ForEach(HostGroup.availableSymbols, id: \.self) { symbolName in
+                Label {
+                    Text(verbatim: HostGroup.displayName(forSymbol: symbolName))
+                } icon: {
+                    Image(systemName: symbolName)
+                }
+                .tag(symbolName)
+            }
+        } label: {
+            Label("Icon", systemImage: group.symbolName)
+        }
+        .pickerStyle(.inline)
+    }
+
+    private var tintBinding: Binding<HostGroupTint> {
+        Binding {
+            group.tint
+        } set: { tint in
+            store.updateGroupTint(id: group.id, tint: tint, in: profileID)
+        }
+    }
+
+    private var symbolBinding: Binding<String> {
+        Binding {
+            group.symbolName
+        } set: { symbolName in
+            store.updateGroupSymbol(id: group.id, symbolName: symbolName, in: profileID)
         }
     }
 }

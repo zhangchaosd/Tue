@@ -7,7 +7,7 @@ enum ProfileImportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidProfileJSON:
-            "Choose a Profile JSON file exported by Tue."
+            String(localized: "Choose a Profile JSON file exported by Tue.")
         }
     }
 }
@@ -29,7 +29,7 @@ final class HostStore {
         archiveURL = storageURL
 
         if let storageURL, var archive = Self.loadArchive(from: storageURL) {
-            let didMigrateBuiltInText = Self.migrateBuiltInEnglishText(in: &archive)
+            let didMigrateBuiltInText = Self.migrateBuiltInGroupNames(in: &archive)
             profiles = archive.profiles
             selectedProfileID = archive.selectedProfileID ?? archive.profiles.first?.id
             if didMigrateBuiltInText {
@@ -143,7 +143,20 @@ final class HostStore {
         }
 
         let trimmedName = trimmed(name)
-        profiles[profileIndex].groups[groupIndex].name = trimmedName.isEmpty ? "Untitled Group" : trimmedName
+        let nextName = trimmedName.isEmpty ? String(localized: "Untitled Label") : trimmedName
+        guard profiles[profileIndex].groups[groupIndex].name != nextName else { return }
+        profiles[profileIndex].groups[groupIndex].name = nextName
+        save()
+    }
+
+    func updateGroupTint(id groupID: UUID, tint: HostGroupTint, in profileID: UUID) {
+        guard let profileIndex = profiles.firstIndex(where: { $0.id == profileID }),
+              let groupIndex = profiles[profileIndex].groups.firstIndex(where: { $0.id == groupID })
+        else {
+            return
+        }
+
+        profiles[profileIndex].groups[groupIndex].tint = tint
         save()
     }
 
@@ -189,7 +202,8 @@ final class HostStore {
             .filter { host in
                 guard !normalizedQuery.isEmpty else { return true }
                 let groupNames = host.groupIDs
-                    .compactMap { group(id: $0, in: profileID)?.name }
+                    .compactMap { group(id: $0, in: profileID) }
+                    .flatMap { [$0.name, $0.displayName] }
                     .joined(separator: " ")
                 let accountNames = host.accounts.map(\.username).joined(separator: " ")
                 return [
@@ -423,10 +437,10 @@ final class HostStore {
     }
 
     private func uniqueProfileName(basedOn name: String) -> String {
-        let baseName = trimmed(name).isEmpty ? "Imported Profile" : trimmed(name)
+        let baseName = trimmed(name).isEmpty ? String(localized: "Imported Profile") : trimmed(name)
         guard profiles.contains(where: { $0.name == baseName }) else { return baseName }
 
-        let copyName = "\(baseName) Copy"
+        let copyName = String(localized: "\(baseName) Copy")
         guard profiles.contains(where: { $0.name == copyName }) else { return copyName }
 
         var index = 2
@@ -456,22 +470,11 @@ final class HostStore {
         }
     }
 
-    private static func migrateBuiltInEnglishText(in archive: inout HostArchive) -> Bool {
+    private static func migrateBuiltInGroupNames(in archive: inout HostArchive) -> Bool {
         var didMigrate = false
         let defaultGroupNamesByID = Dictionary(uniqueKeysWithValues: HostGroup.defaultGroups.map { ($0.id, $0.name) })
 
         for profileIndex in archive.profiles.indices {
-            switch archive.profiles[profileIndex].name {
-            case "\u{5DE5}\u{4F5C}":
-                archive.profiles[profileIndex].name = "Work"
-                didMigrate = true
-            case "\u{5BB6}\u{5EAD}":
-                archive.profiles[profileIndex].name = "Home"
-                didMigrate = true
-            default:
-                break
-            }
-
             for groupIndex in archive.profiles[profileIndex].groups.indices {
                 let group = archive.profiles[profileIndex].groups[groupIndex]
                 guard let defaultName = defaultGroupNamesByID[group.id],
@@ -482,14 +485,6 @@ final class HostStore {
                 }
                 archive.profiles[profileIndex].groups[groupIndex].name = defaultName
                 didMigrate = true
-            }
-
-            for hostIndex in archive.profiles[profileIndex].hosts.indices {
-                let note = archive.profiles[profileIndex].hosts[hostIndex].note
-                if let migratedNote = migratedBuiltInNote(note), migratedNote != note {
-                    archive.profiles[profileIndex].hosts[hostIndex].note = migratedNote
-                    didMigrate = true
-                }
             }
         }
 
@@ -513,21 +508,6 @@ final class HostStore {
         }
     }
 
-    private static func migratedBuiltInNote(_ note: String) -> String? {
-        switch note {
-        case "\u{5F00}\u{53D1}\u{63A5}\u{53E3}\u{670D}\u{52A1}\u{FF0C}\u{65E5}\u{5E38}\u{8054}\u{8C03}\u{4F7F}\u{7528}\u{3002}":
-            "Development API service for daily integration testing."
-        case "\u{6D4B}\u{8BD5}\u{5E93}\u{FF0C}\u{53EA}\u{4FDD}\u{7559}\u{6700}\u{8FD1}\u{4E24}\u{5468}\u{6570}\u{636E}\u{3002}":
-            "Test database with only the last two weeks of data."
-        case "\u{751F}\u{4EA7}\u{5165}\u{53E3}\u{4E3B}\u{673A}\u{FF0C}\u{53D8}\u{66F4}\u{524D}\u{5148}\u{786E}\u{8BA4}\u{7A97}\u{53E3}\u{3002}":
-            "Production entry host. Confirm the maintenance window before making changes."
-        case "\u{5BB6}\u{5EAD} NAS\u{3002}":
-            "Home NAS."
-        default:
-            nil
-        }
-    }
-
     private static var storageDirectoryURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Tue", isDirectory: true)
@@ -541,11 +521,10 @@ final class HostStore {
         [
             HostProfile(
                 id: UUID(),
-                name: "Work",
+                name: String(localized: "Work"),
                 groups: HostGroup.defaultGroups,
                 hosts: [
                     HostRecord(
-                        id: UUID(),
                         hostname: "dev-api-01",
                         domainName: "dev-api.internal.example",
                         ipAddress: "10.0.2.21",
@@ -555,10 +534,9 @@ final class HostStore {
                             HostAccount(username: "deploy", password: "dev-password"),
                             HostAccount(username: "readonly", password: "readonly-password")
                         ],
-                        note: "Development API service for daily integration testing."
+                        note: String(localized: "Development API service for daily integration testing.")
                     ),
                     HostRecord(
-                        id: UUID(),
                         hostname: "test-db-01",
                         domainName: "test-db.internal.example",
                         ipAddress: "10.0.8.15",
@@ -567,10 +545,20 @@ final class HostStore {
                         accounts: [
                             HostAccount(username: "tester", password: "test-password")
                         ],
-                        note: "Test database with only the last two weeks of data."
+                        note: String(localized: "Test database with only the last two weeks of data.")
                     ),
                     HostRecord(
-                        id: UUID(),
+                        hostname: "staging-gw",
+                        domainName: "staging.example.com",
+                        ipAddress: "10.0.5.40",
+                        port: "2222",
+                        groupIDs: [HostGroup.stagingID, HostGroup.testingID],
+                        accounts: [
+                            HostAccount(username: "release", password: "staging-password")
+                        ],
+                        note: String(localized: "Staging gateway shared by QA and release checks.")
+                    ),
+                    HostRecord(
                         hostname: "prod-web-01",
                         domainName: "www.example.com",
                         ipAddress: "172.16.0.12",
@@ -579,26 +567,35 @@ final class HostStore {
                         accounts: [
                             HostAccount(username: "ops", password: "prod-password")
                         ],
-                        note: "Production entry host. Confirm the maintenance window before making changes."
+                        note: String(localized: "Production entry host. Confirm the maintenance window before making changes.")
+                    ),
+                    HostRecord(
+                        hostname: "prod-db-01",
+                        ipAddress: "172.16.0.30",
+                        port: "5432",
+                        groupID: HostGroup.productionID,
+                        accounts: [
+                            HostAccount(username: "dba", password: "db-password")
+                        ],
+                        note: String(localized: "Primary database. Read-only access outside maintenance windows.")
                     )
                 ]
             ),
             HostProfile(
                 id: UUID(),
-                name: "Home",
+                name: String(localized: "Home"),
                 groups: HostGroup.defaultGroups,
                 hosts: [
                     HostRecord(
-                        id: UUID(),
                         hostname: "home-nas",
                         domainName: "nas.local",
                         ipAddress: "192.168.31.20",
                         port: "22",
-                        groupID: HostGroup.productionID,
+                        groupID: HostGroup.otherID,
                         accounts: [
                             HostAccount(username: "admin", password: "nas-password")
                         ],
-                        note: "Home NAS."
+                        note: String(localized: "Home NAS.")
                     )
                 ]
             )

@@ -7,6 +7,7 @@ struct ProfileEditorView: View {
     let profile: HostProfile?
 
     @State private var name: String
+    @FocusState private var isNameFocused: Bool
 
     init(profile: HostProfile? = nil) {
         self.profile = profile
@@ -15,13 +16,22 @@ struct ProfileEditorView: View {
 
     var body: some View {
         Form {
-            Section("Profile") {
+            Section {
                 TextField("Name", text: $name)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .focused($isNameFocused)
+                    .submitLabel(.done)
+                    .onSubmit {
+                        guard canSave else { return }
+                        save()
+                        dismiss()
+                    }
+            } header: {
+                Text("Profile")
+            } footer: {
+                Text("Each Profile keeps its own hosts and labels, such as Work or Home.")
             }
         }
-        .navigationTitle(profile == nil ? "New Profile" : "Rename Profile")
+        .navigationTitle(profile == nil ? Text("New Profile") : Text("Rename Profile"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -35,9 +45,16 @@ struct ProfileEditorView: View {
                     save()
                     dismiss()
                 }
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSave)
             }
         }
+        .onAppear {
+            isNameFocused = true
+        }
+    }
+
+    private var canSave: Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func save() {

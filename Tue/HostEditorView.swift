@@ -37,7 +37,7 @@ struct HostEditorView: View {
         let groups = store.groups(in: profileID)
 
         Form {
-            Section("Basic Info") {
+            Section {
                 TextField("Hostname", text: $hostname)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -51,15 +51,32 @@ struct HostEditorView: View {
                     .keyboardType(.numbersAndPunctuation)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+
+                LabeledContent("Port") {
+                    TextField("22", text: $port)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .onChange(of: port) { _, nextPort in
+                            let digits = String(nextPort.filter { $0.isASCII && $0.isNumber }.prefix(5))
+                            if digits != nextPort {
+                                port = digits
+                            }
+                        }
+                }
+            } header: {
+                Text("Basic Info")
+            } footer: {
+                if !missingFields.isEmpty {
+                    Text("Required: \(missingFields.formatted(.list(type: .and)))")
+                }
             }
 
-            Section("Labels") {
+            Section {
                 LabelSelectionRows(groups: groups, selection: $groupIDs)
-            }
-
-            Section("Login Info") {
-                TextField("Port", text: $port)
-                    .keyboardType(.numberPad)
+            } header: {
+                Text("Labels")
+            } footer: {
+                Text("A host can have several labels.")
             }
 
             Section("Accounts") {
@@ -73,18 +90,20 @@ struct HostEditorView: View {
                 }
 
                 Button {
-                    accounts.append(HostAccount(username: "", password: ""))
+                    withAnimation {
+                        accounts.append(HostAccount(username: "", password: ""))
+                    }
                 } label: {
-                    Label("Add Account", systemImage: "plus.circle")
+                    Label("Add Account", systemImage: "plus.circle.fill")
                 }
             }
 
             Section("Notes") {
-                TextField("Notes", text: $note, axis: .vertical)
+                TextField("Add a note", text: $note, axis: .vertical)
                     .lineLimit(3...6)
             }
         }
-        .navigationTitle(host == nil ? "Add Host" : "Edit Host")
+        .navigationTitle(host == nil ? Text("Add Host") : Text("Edit Host"))
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             selectFallbackGroupsIfNeeded(groups)
@@ -110,10 +129,21 @@ struct HostEditorView: View {
     }
 
     private var canSave: Bool {
-        !trimmed(hostname).isEmpty
-            && !trimmed(ipAddress).isEmpty
-            && !groupIDs.isEmpty
-            && accounts.contains { !trimmed($0.username).isEmpty }
+        missingFields.isEmpty && !groupIDs.isEmpty
+    }
+
+    private var missingFields: [String] {
+        var fields: [String] = []
+        if trimmed(hostname).isEmpty {
+            fields.append(String(localized: "Hostname"))
+        }
+        if trimmed(ipAddress).isEmpty {
+            fields.append(String(localized: "IP Address"))
+        }
+        if !accounts.contains(where: { !trimmed($0.username).isEmpty }) {
+            fields.append(String(localized: "Username"))
+        }
+        return fields
     }
 
     private func saveHost() {
@@ -151,7 +181,9 @@ struct HostEditorView: View {
 
     private func deleteAccount(id: UUID) {
         guard accounts.count > 1 else { return }
-        accounts.removeAll { $0.id == id }
+        withAnimation {
+            accounts.removeAll { $0.id == id }
+        }
         ensureAccountRow()
     }
 
@@ -172,27 +204,36 @@ private struct LabelSelectionRows: View {
                 toggle(group.id)
             } label: {
                 HStack {
-                    Label(group.name, systemImage: group.symbolName)
-                        .foregroundStyle(group.tint.color)
+                    Label {
+                        Text(verbatim: group.displayName)
+                            .foregroundStyle(.primary)
+                    } icon: {
+                        Image(systemName: group.symbolName)
+                            .foregroundStyle(group.tint.color)
+                    }
 
                     Spacer()
 
-                    if selection.contains(group.id) {
-                        Image(systemName: "checkmark")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.tint)
-                    }
+                    Image(systemName: selection.contains(group.id) ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(selection.contains(group.id) ? AnyShapeStyle(group.tint.color) : AnyShapeStyle(.tertiary))
+                        .contentTransition(.symbolEffect(.replace))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(selection.contains(group.id) ? .isSelected : [])
         }
+        .sensoryFeedback(.selection, trigger: selection)
     }
 
     private func toggle(_ groupID: UUID) {
-        if selection.contains(groupID), selection.count > 1 {
-            selection.remove(groupID)
+        if selection.contains(groupID) {
+            // Keep at least one label selected.
+            if selection.count > 1 {
+                selection.remove(groupID)
+            }
         } else {
             selection.insert(groupID)
         }
@@ -205,16 +246,23 @@ private struct HostAccountEditorRow: View {
     let showsDelete: Bool
     let delete: () -> Void
 
+    @State private var isPasswordVisible = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Image(systemName: "person")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+
                 TextField("Username", text: $account.username)
+                    .textContentType(.username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
 
                 if showsDelete {
                     Button(role: .destructive, action: delete) {
-                        Image(systemName: "trash")
+                        Image(systemName: "minus.circle.fill")
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.borderless)
@@ -222,9 +270,32 @@ private struct HostAccountEditorRow: View {
                 }
             }
 
-            TextField("Password", text: $account.password)
+            Divider()
+
+            HStack {
+                Image(systemName: "key")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22)
+
+                Group {
+                    if isPasswordVisible {
+                        TextField("Password (Optional)", text: $account.password)
+                    } else {
+                        SecureField("Password (Optional)", text: $account.password)
+                    }
+                }
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(isPasswordVisible ? Text("Hide Password") : Text("Show Password"))
+            }
         }
         .padding(.vertical, 4)
     }
